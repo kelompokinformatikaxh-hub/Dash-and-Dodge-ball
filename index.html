@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game Petualangan Random</title>
+    <style>
+        body {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        .game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background: linear-gradient(45deg, #1e3c72, #2a5298);
+        }
+
+        .player {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            border-radius: 50%;
+            border: 3px solid #fff;
+            box-shadow: 0 0 20px rgba(255, 107, 107, 0.6);
+            transition: all 0.1s ease;
+            z-index: 10;
+        }
+
+        .player.jumping {
+            transform: scale(1.2);
+            box-shadow: 0 0 30px rgba(255, 107, 107, 0.8);
+        }
+
+        .obstacle {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            background: linear-gradient(45deg, #ff4757, #c44569);
+            border-radius: 4px;
+            box-shadow: 0 0 15px rgba(255, 71, 87, 0.5);
+        }
+
+        .collectible {
+            position: absolute;
+            width: 25px;
+            height: 25px;
+            background: linear-gradient(45deg, #feca57, #ff9ff3);
+            border-radius: 50%;
+            box-shadow: 0 0 15px rgba(254, 202, 87, 0.7);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+        }
+
+        .particle {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: #fff;
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        .ui {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+            z-index: 100;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 15px;
+            color: white;
+            text-align: center;
+            backdrop-filter: blur(10px);
+        }
+
+        .power-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            color: white;
+            font-weight: bold;
+            z-index: 100;
+        }
+
+        .power-bar {
+            width: 150px;
+            height: 10px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 5px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .power-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d2ff, #3a7bd5);
+            width: 100%;
+            transition: width 0.3s ease;
+        }
+
+        .trail {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: rgba(255, 107, 107, 0.6);
+            border-radius: 50%;
+            pointer-events: none;
+            animation: fadeOut 0.5s ease-out forwards;
+        }
+
+        @keyframes fadeOut {
+            to {
+                opacity: 0;
+                transform: scale(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container" id="gameContainer">
+        <div class="player" id="player"></div>
+        
+        <div class="ui">
+            <div>Skor: <span id="score">0</span></div>
+            <div>Level: <span id="level">1</span></div>
+        </div>
+
+        <div class="power-indicator">
+            <div>Power: <span id="powerLevel">100</span>%</div>
+            <div class="power-bar">
+                <div class="power-fill" id="powerFill"></div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <div>🎮 WASD/Arrow Keys: Gerak | Space: Lompat | Shift: Dash | R: Reset</div>
+            <div>Kumpulkan ⭐ dan hindari ❌</div>
+        </div>
+    </div>
+
+    <script>
+        class Game {
+            constructor() {
+                this.player = document.getElementById('player');
+                this.gameContainer = document.getElementById('gameContainer');
+                this.score = 0;
+                this.level = 1;
+                this.power = 100;
+                
+                this.playerPos = {
+                    x: window.innerWidth / 2,
+                    y: window.innerHeight / 2
+                };
+                
+                this.velocity = { x: 0, y: 0 };
+                this.isJumping = false;
+                this.obstacles = [];
+                this.collectibles = [];
+                this.particles = [];
+                this.trails = [];
+                
+                this.keys = {};
+                this.gameSpeed = 1;
+                
+                this.init();
+            }
+            
+            init() {
+                this.updatePlayerPosition();
+                this.bindEvents();
+                this.spawnInitialItems();
+                this.gameLoop();
+            }
+            
+            bindEvents() {
+                document.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+                    this.handleKeyPress(e);
+                });
+                
+                document.addEventListener('keyup', (e) => {
+                    this.keys[e.code] = false;
+                });
+            }
+            
+            handleKeyPress(e) {
+                switch(e.code) {
+                    case 'Space':
+                        e.preventDefault();
+                        this.jump();
+                        break;
+                    case 'ShiftLeft':
+                    case 'ShiftRight':
+                        this.dash();
+                        break;
+                    case 'KeyR':
+                        this.reset();
+                        break;
+                }
+            }
+            
+            jump() {
+                if (!this.isJumping && this.power >= 20) {
+                    this.isJumping = true;
+                    this.power -= 20;
+                    this.player.classList.add('jumping');
+                    this.createParticles(this.playerPos.x, this.playerPos.y, '#fff', 8);
+                    
+                    setTimeout(() => {
+                        this.isJumping = false;
+                        this.player.classList.remove('jumping');
+                    }, 300);
+                }
+            }
+            
+            dash() {
+                if (this.power >= 30) {
+                    this.power -= 30;
+                    const dashPower = 15;
+                    
+                    if (this.keys['KeyW'] || this.keys['ArrowUp']) this.velocity.y -= dashPower;
+                    if (this.keys['KeyS'] || this.keys['ArrowDown']) this.velocity.y += dashPower;
+                    if (this.keys['KeyA'] || this.keys['ArrowLeft']) this.velocity.x -= dashPower;
+                    if (this.keys['KeyD'] || this.keys['ArrowRight']) this.velocity.x += dashPower;
+                    
+                    this.createParticles(this.playerPos.x, this.playerPos.y, '#00d2ff', 12);
+                }
+            }
+            
+            updateMovement() {
+                const speed = 0.8;
+                const friction = 0.85;
+                
+                // Gerakan dengan WASD atau Arrow Keys
+                if (this.keys['KeyW'] || this.keys['ArrowUp']) this.velocity.y -= speed;
+                if (this.keys['KeyS'] || this.keys['ArrowDown']) this.velocity.y += speed;
+                if (this.keys['KeyA'] || this.keys['ArrowLeft']) this.velocity.x -= speed;
+                if (this.keys['KeyD'] || this.keys['ArrowRight']) this.velocity.x += speed;
+                
+                // Terapkan friction
+                this.velocity.x *= friction;
+                this.velocity.y *= friction;
+                
+                // Update posisi
+                this.playerPos.x += this.velocity.x;
+                this.playerPos.y += this.velocity.y;
+                
+                // Batasi dalam layar
+                this.playerPos.x = Math.max(20, Math.min(window.innerWidth - 20, this.playerPos.x));
+                this.playerPos.y = Math.max(20, Math.min(window.innerHeight - 20, this.playerPos.y));
+                
+                // Buat trail
+                if (Math.abs(this.velocity.x) > 1 || Math.abs(this.velocity.y) > 1) {
+                    this.createTrail();
+                }
+            }
+            
+            createTrail() {
+                const trail = document.createElement('div');
+                trail.className = 'trail';
+                trail.style.left = this.playerPos.x + 'px';
+                trail.style.top = this.playerPos.y + 'px';
+                this.gameContainer.appendChild(trail);
+                
+                setTimeout(() => {
+                    if (trail.parentNode) {
+                        trail.parentNode.removeChild(trail);
+                    }
+                }, 500);
+            }
+            
+            updatePlayerPosition() {
+                this.player.style.left = this.playerPos.x + 'px';
+                this.player.style.top = this.playerPos.y + 'px';
+            }
+            
+            spawnInitialItems() {
+                // Spawn obstacles
+                for (let i = 0; i < 5; i++) {
+                    this.spawnObstacle();
+                }
+                
+                // Spawn collectibles
+                for (let i = 0; i < 3; i++) {
+                    this.spawnCollectible();
+                }
+            }
+            
+            spawnObstacle() {
+                const obstacle = document.createElement('div');
+                obstacle.className = 'obstacle';
+                obstacle.style.left = Math.random() * (window.innerWidth - 30) + 'px';
+                obstacle.style.top = Math.random() * (window.innerHeight - 30) + 'px';
+                this.gameContainer.appendChild(obstacle);
+                this.obstacles.push(obstacle);
+            }
+            
+            spawnCollectible() {
+                const collectible = document.createElement('div');
+                collectible.className = 'collectible';
+                collectible.style.left = Math.random() * (window.innerWidth - 25) + 'px';
+                collectible.style.top = Math.random() * (window.innerHeight - 25) + 'px';
+                this.gameContainer.appendChild(collectible);
+                this.collectibles.push(collectible);
+            }
+            
+            checkCollisions() {
+                const playerRect = {
+                    x: this.playerPos.x - 20,
+                    y: this.playerPos.y - 20,
+                    width: 40,
+                    height: 40
+                };
+                
+                // Check obstacle collisions
+                this.obstacles.forEach((obstacle, index) => {
+                    const obstacleRect = obstacle.getBoundingClientRect();
+                    const containerRect = this.gameContainer.getBoundingClientRect();
+                    
+                    const obsRect = {
+                        x: obstacleRect.left - containerRect.left,
+                        y: obstacleRect.top - containerRect.top,
+                        width: 30,
+                        height: 30
+                    };
+                    
+                    if (this.isColliding(playerRect, obsRect)) {
+                        this.createParticles(this.playerPos.x, this.playerPos.y, '#ff4757', 10);
+                        this.power = Math.max(0, this.power - 25);
+                        this.score = Math.max(0, this.score - 15);
+                        obstacle.remove();
+                        this.obstacles.splice(index, 1);
+                        this.spawnObstacle();
+                    }
+                });
+                
+                // Check collectible collisions
+                this.collectibles.forEach((collectible, index) => {
+                    const collectibleRect = collectible.getBoundingClientRect();
+                    const containerRect = this.gameContainer.getBoundingClientRect();
+                    
+                    const colRect = {
+                        x: collectibleRect.left - containerRect.left,
+                        y: collectibleRect.top - containerRect.top,
+                        width: 25,
+                        height: 25
+                    };
+                    
+                    if (this.isColliding(playerRect, colRect)) {
+                        this.score += 10;
+                        this.power = Math.min(100, this.power + 15);
+                        this.createParticles(this.playerPos.x, this.playerPos.y, '#feca57', 8);
+                        collectible.remove();
+                        this.collectibles.splice(index, 1);
+                        this.spawnCollectible();
+                        
+                        if (this.score % 50 === 0) {
+                            this.level++;
+                            this.spawnObstacle();
+                        }
+                    }
+                });
+            }
+            
+            isColliding(rect1, rect2) {
+                return rect1.x < rect2.x + rect2.width &&
+                       rect1.x + rect1.width > rect2.x &&
+                       rect1.y < rect2.y + rect2.height &&
+                       rect1.y + rect1.height > rect2.y;
+            }
+            
+            createParticles(x, y, color, count) {
+                for (let i = 0; i < count; i++) {
+                    const particle = document.createElement('div');
+                    particle.className = 'particle';
+                    particle.style.left = x + (Math.random() - 0.5) * 40 + 'px';
+                    particle.style.top = y + (Math.random() - 0.5) * 40 + 'px';
+                    particle.style.background = color;
+                    this.gameContainer.appendChild(particle);
+                    
+                    setTimeout(() => {
+                        if (particle.parentNode) {
+                            particle.parentNode.removeChild(particle);
+                        }
+                    }, 1000);
+                }
+            }
+            
+            updateUI() {
+                document.getElementById('score').textContent = this.score;
+                document.getElementById('level').textContent = this.level;
+                document.getElementById('powerLevel').textContent = Math.round(this.power);
+                document.getElementById('powerFill').style.width = this.power + '%';
+            }
+            
+            regeneratePower() {
+                if (this.power < 100) {
+                    this.power += 0.5;
+                }
+            }
+            
+            reset() {
+                this.score = 0;
+                this.level = 1;
+                this.power = 100;
+                this.playerPos = {
+                    x: window.innerWidth / 2,
+                    y: window.innerHeight / 2
+                };
+                this.velocity = { x: 0, y: 0 };
+                
+                // Clear all items
+                this.obstacles.forEach(obs => obs.remove());
+                this.collectibles.forEach(col => col.remove());
+                this.obstacles = [];
+                this.collectibles = [];
+                
+                this.spawnInitialItems();
+            }
+            
+            gameLoop() {
+                this.updateMovement();
+                this.updatePlayerPosition();
+                this.checkCollisions();
+                this.regeneratePower();
+                this.updateUI();
+                
+                requestAnimationFrame(() => this.gameLoop());
+            }
+        }
+        
+        // Start game when page loads
+        window.addEventListener('load', () => {
+            new Game();
+        });
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            location.reload();
+        });
+    </script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'98a416f7b7c0445e',t:'MTc1OTc0MjQ5OC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
